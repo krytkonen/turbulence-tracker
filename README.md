@@ -38,14 +38,25 @@ offline.
 > added from Safari). Grant **Motion & Orientation** and **Location** on first
 > **Enable Sensors** tap.
 
-### Map tiles offline
+### Saving map tiles for offline / in-flight use
 
-The app shell always works offline. **Map tiles** are cached as you view them,
-so any area you pan/zoom over *while online* stays available in flight. To
-guarantee coverage for a route, open the app on the ground (Wi-Fi/cellular) and
-scroll the map over your planned track and alternates first — those tiles are
-then served from cache with no connection. Turbulence detection, logging and
-GPS positioning need **no** tiles and work regardless.
+The app shell always works offline. **Map tiles** need to be cached while you
+still have a connection. Two ways:
+
+- **SAVE AREA button** (recommended) — pan/zoom to the area you want, pick the
+  map style, then tap **SAVE AREA** (below the map-style button). It downloads
+  every tile covering the current view — at the current zoom plus two deeper
+  levels — into permanent offline storage and shows progress (e.g. `42%`).
+  Saved tiles are never evicted and survive app updates. Repeat along your
+  route and for any alternates. A single save is capped at ~1200 tiles, so
+  work in view-sized chunks rather than zoomed all the way out.
+- **Passive caching** — any area you simply pan/zoom over while online is also
+  cached automatically (with a rolling size limit), so recently viewed areas
+  stay available too.
+
+Tiles are saved per map style, so save the style you plan to fly with.
+Turbulence detection, logging and GPS positioning need **no** tiles and work
+regardless of connection.
 
 ### Updating
 
