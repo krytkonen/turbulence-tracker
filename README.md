@@ -16,7 +16,7 @@ Uses iPad accelerometers and GPS to detect, categorise, and georeference turbule
 
 ## Usage
 
-Open `https://krytkonen.github.io/pireplog/` in Safari on iPad.  
+Open `https://krytkonen.github.io/turbulence-tracker/` in Safari on iPad.  
 Tap **Enable Sensors** and allow both motion and location permissions.
 
 ## Install as an app (offline / in-flight)
@@ -29,7 +29,7 @@ offline.
 
 **Install on iPad (Safari):**
 
-1. Open `https://krytkonen.github.io/pireplog/` **once while online**.
+1. Open `https://krytkonen.github.io/turbulence-tracker/` **once while online**.
 2. Tap the **Share** button → **Add to Home Screen** → **Add**.
 3. Launch **PIREPlog** from the home screen. It opens full-screen with no
    browser chrome.
