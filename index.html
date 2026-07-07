@@ -1,0 +1,894 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
+<title>PIREPlog — Turbulence Tracker</title>
+
+<!-- ── PWA / installable EFB ── -->
+<link rel="manifest" href="./manifest.webmanifest">
+<meta name="theme-color" content="#080c10">
+<meta name="color-scheme" content="dark">
+<meta name="application-name" content="PIREPlog">
+<!-- iPad / iOS home-screen app -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="PIREPlog">
+<link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="./icons/favicon-32.png">
+<link rel="icon" type="image/png" sizes="512x512" href="./icons/icon-512.png">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@300;400;600;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<!-- Leaflet vendored locally so the map engine works fully offline / in-flight -->
+<link rel="stylesheet" href="./vendor/leaflet.css"/>
+<script src="./vendor/leaflet.js"></script>
+<style>
+:root {
+  --bg:        #080c10;
+  --bg2:       #0d1520;
+  --bg3:       #111c2b;
+  --border:    #1a2e44;
+  --amber:     #f0a500;
+  --amber-dim: #7a5200;
+  --cyan:      #00d4ff;
+  --cyan-dim:  #004d5e;
+  --green:     #00e676;
+  --green-dim: #005a24;
+  --orange:    #ff6d00;
+  --red:       #ff1744;
+  --text:      #c8d8e8;
+  --text-dim:  #4a6070;
+  --mono:      'Share Tech Mono', monospace;
+  --sans:      'Chakra Petch', sans-serif;
+}
+* { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+html, body { height:100%; overflow:hidden; background:var(--bg); color:var(--text); font-family:var(--sans); }
+
+/* ── PERMISSION OVERLAY ── */
+#overlay {
+  position:fixed; inset:0; z-index:9999;
+  background:var(--bg);
+  display:flex; flex-direction:column; align-items:center; justify-content:center;
+  gap:24px; padding:40px; text-align:center;
+}
+.overlay-glyph { font-size:56px; filter:drop-shadow(0 0 20px var(--cyan)); animation:pulse 2s ease-in-out infinite; }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.6} }
+.overlay-title { font-size:28px; font-weight:700; color:var(--cyan); letter-spacing:3px; }
+.overlay-sub { font-size:13px; color:var(--text-dim); max-width:380px; line-height:1.7; }
+.overlay-note {
+  font-family:var(--mono); font-size:11px; color:var(--amber);
+  border:1px solid var(--amber-dim); border-radius:4px;
+  padding:10px 16px; max-width:380px; line-height:1.6;
+}
+#start-btn {
+  background:transparent; border:2px solid var(--cyan); color:var(--cyan);
+  font-family:var(--sans); font-weight:700; font-size:16px; letter-spacing:2px;
+  padding:14px 40px; border-radius:4px; cursor:pointer;
+  transition:all .2s; margin-top:8px;
+}
+#start-btn:hover, #start-btn:active { background:var(--cyan); color:var(--bg); }
+
+/* ── LAYOUT ── */
+#app { display:flex; flex-direction:column; height:100vh; }
+
+/* ── HEADER ── */
+#hdr {
+  display:flex; align-items:center; justify-content:space-between;
+  background:var(--bg2); border-bottom:1px solid var(--border);
+  padding:0 16px; height:48px; flex-shrink:0;
+  /* keep clear of the iOS status bar / notch in installed standalone mode */
+  padding-top:env(safe-area-inset-top);
+  height:calc(48px + env(safe-area-inset-top));
+  padding-left:calc(16px + env(safe-area-inset-left));
+  padding-right:calc(16px + env(safe-area-inset-right));
+}
+.hdr-logo { font-size:15px; font-weight:700; color:var(--cyan); letter-spacing:3px; }
+.hdr-logo span { color:var(--text-dim); font-weight:300; }
+#turb-pill {
+  font-family:var(--mono); font-size:12px; font-weight:600; letter-spacing:1.5px;
+  padding:5px 14px; border-radius:3px; border:1px solid;
+  transition:all .3s;
+}
+.pill-smooth   { border-color:var(--green-dim); color:var(--green);  background:rgba(0,230,118,0.08); }
+.pill-light    { border-color:#7a6000;           color:var(--amber);  background:rgba(240,165,0,0.10); }
+.pill-moderate { border-color:#7a3000;           color:var(--orange); background:rgba(255,109,0,0.10); }
+.pill-severe   { border-color:#7a0010;           color:var(--red);    background:rgba(255,23,68,0.12);
+                 animation:flash .4s ease-in-out infinite alternate; }
+@keyframes flash { from{background:rgba(255,23,68,0.12)} to{background:rgba(255,23,68,0.28)} }
+
+/* ── INSTRUMENT BAR ── */
+#ibar {
+  display:flex; gap:0; background:var(--bg3);
+  border-bottom:1px solid var(--border); flex-shrink:0; overflow:hidden;
+}
+.inst {
+  flex:1; padding:7px 12px; border-right:1px solid var(--border);
+  display:flex; flex-direction:column; gap:2px; min-width:0;
+}
+.inst:last-child { border-right:none; }
+.inst-label { font-size:9px; color:var(--text-dim); letter-spacing:1.5px; text-transform:uppercase; }
+.inst-value { font-family:var(--mono); font-size:16px; color:var(--cyan); white-space:nowrap; overflow:hidden; }
+.inst-bar { height:3px; background:var(--border); border-radius:2px; margin-top:3px; }
+.inst-bar-fill { height:100%; border-radius:2px; transition:width .15s, background .3s; }
+
+/* ── MAP ── */
+#map { flex:1; min-height:0; touch-action:pan-x pan-y pinch-zoom; }
+
+/* ── POSITION MARKER ── */
+.pos-marker {
+  display:flex; align-items:center; justify-content:center;
+  filter:drop-shadow(0 0 6px #00d4ff) drop-shadow(0 0 14px #00d4ff88);
+  pointer-events:none;
+}
+
+/* ── CENTER BTN ── */
+#center-btn {
+  position:absolute; bottom:158px; right:12px; z-index:800;
+  background:rgba(13,21,32,0.92); border:1px solid var(--border); color:var(--cyan);
+  font-size:18px; width:38px; height:38px; border-radius:6px;
+  display:flex; align-items:center; justify-content:center;
+  cursor:pointer; box-shadow:0 2px 8px rgba(0,0,0,.5);
+  transition:background .15s;
+}
+#center-btn:active { background:var(--border); }
+
+/* ── MAP LAYER TOGGLE ── */
+#layer-btn {
+  position:absolute; bottom:204px; right:12px; z-index:800;
+  background:rgba(13,21,32,0.92); border:1px solid var(--border); color:var(--cyan);
+  font-family:var(--mono); font-size:9px; letter-spacing:0.5px;
+  width:38px; height:38px; border-radius:6px;
+  display:flex; align-items:center; justify-content:center;
+  cursor:pointer; box-shadow:0 2px 8px rgba(0,0,0,.5);
+  transition:background .15s; text-align:center; line-height:1.2;
+}
+#layer-btn:active { background:var(--border); }
+
+/* ── LOG PANEL ── */
+#log {
+  background:var(--bg2); border-top:1px solid var(--border);
+  height:148px; flex-shrink:0; display:flex; flex-direction:column;
+  /* keep the last log rows clear of the iOS home indicator */
+  padding-bottom:env(safe-area-inset-bottom);
+  height:calc(148px + env(safe-area-inset-bottom));
+}
+#log-hdr {
+  display:flex; align-items:center; justify-content:space-between;
+  padding:6px 12px; border-bottom:1px solid var(--border);
+  font-size:10px; letter-spacing:1.5px; color:var(--text-dim);
+}
+.log-count { font-family:var(--mono); color:var(--cyan); }
+#log-body { flex:1; overflow-y:auto; padding:4px 0; }
+#log-body::-webkit-scrollbar { width:3px; }
+#log-body::-webkit-scrollbar-track { background:transparent; }
+#log-body::-webkit-scrollbar-thumb { background:var(--border); }
+.log-row {
+  display:grid; grid-template-columns:64px 84px 58px 52px 1fr;
+  gap:4px; padding:5px 12px; font-family:var(--mono); font-size:11px;
+  border-left:3px solid transparent; margin:1px 0;
+  align-items:center;
+}
+.log-row.light    { border-color:var(--amber);  background:rgba(240,165,0,0.05); }
+.log-row.moderate { border-color:var(--orange); background:rgba(255,109,0,0.05); }
+.log-row.severe   { border-color:var(--red);    background:rgba(255,23,68,0.07); }
+.log-time { color:var(--text-dim); }
+.log-cat  { font-weight:700; letter-spacing:0.5px; }
+.log-cat.light    { color:var(--amber);  }
+.log-cat.moderate { color:var(--orange); }
+.log-cat.severe   { color:var(--red);    }
+.log-g    { color:var(--cyan); }
+.log-age  { color:var(--text-dim); font-size:10px; }
+.log-pos  { color:var(--text-dim); font-size:10px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.log-empty { padding:16px 12px; font-family:var(--mono); font-size:11px; color:var(--text-dim); }
+
+/* ── HANDLING BADGE ── */
+#handling-badge {
+  position:absolute; top:56px; left:50%; transform:translateX(-50%);
+  background:var(--bg2); border:1px solid var(--cyan-dim); color:var(--cyan);
+  font-family:var(--mono); font-size:11px; letter-spacing:1px;
+  padding:4px 14px; border-radius:3px; z-index:800; display:none;
+  pointer-events:none;
+}
+
+/* ── CUSTOM LEAFLET MARKERS ── */
+.turb-marker {
+  border-radius:50%; border:2px solid rgba(255,255,255,0.7);
+  cursor:pointer; transition:opacity .5s;
+}
+
+/* ── GPS STATUS ── */
+#gps-dot {
+  display:inline-block; width:7px; height:7px; border-radius:50%;
+  background:var(--text-dim); margin-right:5px; flex-shrink:0;
+}
+#gps-dot.active { background:var(--green); box-shadow:0 0 6px var(--green); }
+</style>
+</head>
+<body>
+
+<!-- PERMISSION OVERLAY -->
+<div id="overlay">
+  <div class="overlay-glyph">✈</div>
+  <div class="overlay-title">PIREPlog</div>
+  <div style="font-size:13px;color:var(--text-dim);letter-spacing:1px;">TURBULENCE DETECTION SYSTEM</div>
+  <div class="overlay-sub">
+    Uses iPad accelerometers and GPS to detect, categorise, and georeference turbulence events in real time.
+    Events are plotted on a map and fade linearly over 60 minutes.
+  </div>
+  <div class="overlay-note">
+    ⚡ SMART FILTER ACTIVE<br>
+    Device handling and deliberate iPad movements are automatically excluded using a touch-event suppressor and high-pass acceleration filter. Only genuine aerodynamic turbulence is logged.
+  </div>
+  <button id="start-btn" onclick="startApp()">ENABLE SENSORS &amp; START</button>
+</div>
+
+<!-- MAIN APP -->
+<div id="app">
+
+  <div id="hdr">
+    <div class="hdr-logo">PIREP<span>log</span></div>
+    <div id="turb-pill" class="pill-smooth">● SMOOTH AIR</div>
+  </div>
+
+  <div id="ibar">
+    <div class="inst">
+      <div class="inst-label">ACCEL (g)</div>
+      <div class="inst-value" id="iv-g">0.000</div>
+      <div class="inst-bar"><div class="inst-bar-fill" id="ib-g" style="width:0%;background:var(--cyan);"></div></div>
+    </div>
+    <div class="inst">
+      <div class="inst-label">JERK (g/s)</div>
+      <div class="inst-value" id="iv-j">0.000</div>
+      <div class="inst-bar"><div class="inst-bar-fill" id="ib-j" style="width:0%;background:var(--cyan);"></div></div>
+    </div>
+    <div class="inst">
+      <div class="inst-label">EVENTS</div>
+      <div class="inst-value" id="iv-ev">0</div>
+    </div>
+    <div class="inst" style="flex:2">
+      <div class="inst-label">
+        <span id="gps-dot"></span>POSITION
+      </div>
+      <div class="inst-value" id="iv-pos" style="font-size:12px;padding-top:2px;">ACQUIRING…</div>
+    </div>
+  </div>
+
+  <div id="map"></div>
+  <button id="center-btn" title="Centre on position">◎</button>
+  <button id="layer-btn" title="Toggle map layer">MAP<br>STYLE</button>
+
+  <div id="log">
+    <div id="log-hdr">
+      <span>TURBULENCE EVENT LOG</span>
+      <span class="log-count" id="log-count">0 events</span>
+    </div>
+    <div id="log-body">
+      <div class="log-empty">No turbulence events recorded.</div>
+    </div>
+  </div>
+
+</div>
+
+<div id="handling-badge">⊘ HANDLING — SUPPRESSED</div>
+
+<script>
+// ════════════════════════════════════
+// CONFIG
+// ════════════════════════════════════
+const CFG = {
+  // High-pass filter coefficient (0→bypass, 1→block all low-freq)
+  HP_ALPHA: 0.87,
+  // Window sizes (samples). Device motion fires ~60Hz
+  RMS_WINDOW:  45,   // ~0.75 s for RMS
+  JERK_SMOOTH: 8,    // samples to smooth jerk
+  // Turbulence thresholds (g, after high-pass)
+  T_LIGHT:    0.09,
+  T_MODERATE: 0.22,
+  T_SEVERE:   0.48,
+  // Touch suppression: ms after last touch to ignore motion
+  TOUCH_COOL: 3500,
+  // Min ms between logged events (de-bounce)
+  EVENT_COOL: 9000,
+  // How many seconds a level must persist before logging
+  PERSIST_SAMPLES: 18,
+  // Marker fade duration
+  FADE_MS: 60 * 60 * 1000,
+  // Marker refresh interval
+  MARKER_REFRESH: 6000,
+};
+
+// ════════════════════════════════════
+// STATE
+// ════════════════════════════════════
+let map = null;
+let gpsPos = null;
+let gpsHeading = null;
+let posMarker = null;
+let posAccuracyCircle = null;
+let followPosition = true;   // auto-pan to position
+let lastTouch = 0;
+let lastEventTs = 0;
+let totalEvents = 0;
+
+// Accelerometer buffers
+let hpState  = {x:0,y:0,z:0};
+let hpPrev   = {x:0,y:0,z:0};
+let rmsBuffer   = [];          // filtered samples for RMS
+let prevJerkAcc = {x:0,y:0,z:0};
+let jerkBuffer  = [];          // jerk magnitudes
+let lastMotionTs = 0;
+
+// Level persistence (don't log single-sample spikes)
+let persistLevel = 'smooth';
+let persistCount = 0;
+
+// Events & markers
+const events  = [];
+const mapMarkers = [];
+
+// ════════════════════════════════════
+// HIGH-PASS FILTER
+// Removes slow DC (gravity) and deliberate slow movements.
+// y[n] = α·(y[n-1] + x[n] - x[n-1])
+// ════════════════════════════════════
+function hpFilter(raw) {
+  hpState.x = CFG.HP_ALPHA * (hpState.x + raw.x - hpPrev.x);
+  hpState.y = CFG.HP_ALPHA * (hpState.y + raw.y - hpPrev.y);
+  hpState.z = CFG.HP_ALPHA * (hpState.z + raw.z - hpPrev.z);
+  hpPrev = {x:raw.x, y:raw.y, z:raw.z};
+  return {x:hpState.x, y:hpState.y, z:hpState.z};
+}
+
+// ════════════════════════════════════
+// DEVICE MOTION HANDLER
+// ════════════════════════════════════
+function onMotion(e) {
+  const ag = e.accelerationIncludingGravity;
+  if (!ag) return;
+
+  const now = performance.now();
+  const dt  = lastMotionTs ? (now - lastMotionTs) / 1000 : 0.016;
+  lastMotionTs = now;
+
+  const raw = {x: ag.x||0, y: ag.y||0, z: ag.z||0};
+
+  // ── HIGH-PASS FILTER (removes gravity + slow user movements)
+  const filt = hpFilter(raw);
+
+  // ── RMS OVER WINDOW
+  rmsBuffer.push(filt);
+  if (rmsBuffer.length > CFG.RMS_WINDOW) rmsBuffer.shift();
+  const rmsG = calcRMS(rmsBuffer);
+
+  // ── JERK (rate-of-change of filtered acceleration)
+  let jmag = 0;
+  if (dt > 0) {
+    const jx = (filt.x - prevJerkAcc.x) / dt;
+    const jy = (filt.y - prevJerkAcc.y) / dt;
+    const jz = (filt.z - prevJerkAcc.z) / dt;
+    jmag = Math.sqrt(jx*jx + jy*jy + jz*jz) / 9.81;
+  }
+  prevJerkAcc = {x:filt.x, y:filt.y, z:filt.z};
+  jerkBuffer.push(jmag);
+  if (jerkBuffer.length > CFG.JERK_SMOOTH) jerkBuffer.shift();
+  const smoothJerk = jerkBuffer.reduce((a,b)=>a+b,0)/jerkBuffer.length;
+
+  // ── UPDATE INSTRUMENTS
+  updateInstruments(rmsG, smoothJerk);
+
+  // ── HANDLING SUPPRESSION CHECK
+  const isHandling = (Date.now() - lastTouch) < CFG.TOUCH_COOL;
+  document.getElementById('handling-badge').style.display = isHandling ? 'block' : 'none';
+  if (isHandling) {
+    setPill('smooth');
+    return;
+  }
+
+  // ── CLASSIFY CURRENT SAMPLE
+  // Both RMS and jerk must agree for moderate/severe to avoid false positives.
+  let level = 'smooth';
+  if      (rmsG >= CFG.T_SEVERE   && smoothJerk >= CFG.T_SEVERE*2)   level = 'severe';
+  else if (rmsG >= CFG.T_SEVERE)                                       level = 'severe';
+  else if (rmsG >= CFG.T_MODERATE && smoothJerk >= CFG.T_MODERATE*1.5) level = 'moderate';
+  else if (rmsG >= CFG.T_MODERATE)                                     level = 'moderate';
+  else if (rmsG >= CFG.T_LIGHT)                                        level = 'light';
+
+  // ── PERSIST CHECK (avoid single-spike false positives)
+  if (level === persistLevel) {
+    persistCount++;
+  } else {
+    persistLevel = level;
+    persistCount = 1;
+  }
+
+  setPill(level);
+
+  // ── LOG EVENT
+  const readyToLog = persistCount >= CFG.PERSIST_SAMPLES
+                  && level !== 'smooth'
+                  && (Date.now() - lastEventTs) > CFG.EVENT_COOL
+                  && gpsPos;
+  if (readyToLog) {
+    logEvent(level, rmsG, smoothJerk);
+    persistCount = 0; // reset so it doesn't log every frame
+  }
+}
+
+// ════════════════════════════════════
+// RMS CALCULATION
+// ════════════════════════════════════
+function calcRMS(buf) {
+  if (!buf.length) return 0;
+  let sum = 0;
+  for (const s of buf) sum += s.x*s.x + s.y*s.y + s.z*s.z;
+  return Math.sqrt(sum / buf.length) / 9.81;
+}
+
+// ════════════════════════════════════
+// INSTRUMENTS UI
+// ════════════════════════════════════
+function updateInstruments(rmsG, jerkG) {
+  document.getElementById('iv-g').textContent = rmsG.toFixed(3);
+  document.getElementById('iv-j').textContent = jerkG.toFixed(3);
+
+  const fillG = Math.min(100, (rmsG / 0.7) * 100);
+  const fillJ = Math.min(100, (jerkG / 2.0) * 100);
+
+  const bgG = rmsG >= CFG.T_SEVERE ? 'var(--red)'
+            : rmsG >= CFG.T_MODERATE ? 'var(--orange)'
+            : rmsG >= CFG.T_LIGHT   ? 'var(--amber)'
+            : 'var(--cyan)';
+
+  document.getElementById('ib-g').style.cssText = `width:${fillG}%;background:${bgG}`;
+  document.getElementById('ib-j').style.cssText = `width:${fillJ}%;background:${bgG}`;
+}
+
+// ════════════════════════════════════
+// TURBULENCE PILL
+// ════════════════════════════════════
+const PILL_CFG = {
+  smooth:   { cls:'pill-smooth',   label:'● SMOOTH AIR' },
+  light:    { cls:'pill-light',    label:'▲ LIGHT TURB' },
+  moderate: { cls:'pill-moderate', label:'▲ MOD TURBULENCE' },
+  severe:   { cls:'pill-severe',   label:'⚠ SEVERE TURBULENCE' },
+};
+function setPill(level) {
+  const el = document.getElementById('turb-pill');
+  const c  = PILL_CFG[level] || PILL_CFG.smooth;
+  el.className = 'pill-' + level;
+  el.textContent = c.label;
+}
+
+// ════════════════════════════════════
+// EVENT LOGGING
+// ════════════════════════════════════
+function logEvent(level, rmsG, jerkG) {
+  lastEventTs = Date.now();
+  totalEvents++;
+  document.getElementById('iv-ev').textContent = totalEvents;
+  document.getElementById('log-count').textContent = `${totalEvents} event${totalEvents!==1?'s':''}`;
+
+  const ev = {
+    id:    Date.now(),
+    ts:    new Date(),
+    level, rmsG, jerkG,
+    lat:   gpsPos.lat,
+    lon:   gpsPos.lon,
+  };
+  events.unshift(ev);
+
+  addMarker(ev);
+  prependLogRow(ev);
+  // Fly to event only if not already following position
+  if (!followPosition) map.panTo([ev.lat, ev.lon], {animate:true, duration:0.5});
+}
+
+// ════════════════════════════════════
+// MAP MARKERS
+// ════════════════════════════════════
+const LEVEL_COLOR = { light:'#f0a500', moderate:'#ff6d00', severe:'#ff1744' };
+const LEVEL_SIZE  = { light:18, moderate:26, severe:36 };
+
+function makeIcon(level, opacity) {
+  const color = LEVEL_COLOR[level];
+  const size  = LEVEL_SIZE[level];
+  const glow  = Math.round(size * opacity);
+  return L.divIcon({
+    className: '',
+    html: `<div class="turb-marker" style="
+      width:${size}px;height:${size}px;
+      background:${color};
+      opacity:${opacity.toFixed(2)};
+      box-shadow:0 0 ${glow}px ${color}, 0 0 ${Math.round(glow*2)}px ${color}40;
+    "></div>`,
+    iconSize:   [size, size],
+    iconAnchor: [size/2, size/2],
+  });
+}
+
+function addMarker(ev) {
+  const marker = L.marker([ev.lat, ev.lon], { icon: makeIcon(ev.level, 1.0) })
+    .bindPopup(buildPopup(ev), {className:'turb-popup'})
+    .addTo(map);
+  mapMarkers.push({ marker, ev });
+}
+
+function buildPopup(ev) {
+  const color = LEVEL_COLOR[ev.level];
+  return `<div style="font-family:'Chakra Petch',sans-serif;font-size:12px;min-width:180px;">
+    <div style="font-weight:700;font-size:14px;color:${color};letter-spacing:1px;margin-bottom:8px;">
+      ${ev.level.toUpperCase()} TURBULENCE
+    </div>
+    <div style="font-family:'Share Tech Mono',monospace;font-size:11px;line-height:1.9;color:#c8d8e8;">
+      TIME&nbsp; ${ev.ts.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'})}<br>
+      RMS&nbsp;&nbsp; ${ev.rmsG.toFixed(3)} g<br>
+      JERK&nbsp; ${ev.jerkG.toFixed(3)} g/s<br>
+      LAT&nbsp;&nbsp; ${ev.lat.toFixed(5)}°<br>
+      LON&nbsp;&nbsp; ${ev.lon.toFixed(5)}°
+    </div>
+  </div>`;
+}
+
+function refreshMarkers() {
+  for (let i = mapMarkers.length - 1; i >= 0; i--) {
+    const { marker, ev } = mapMarkers[i];
+    const age     = Date.now() - ev.id;
+    const opacity = Math.max(0, 1 - age / CFG.FADE_MS);
+    if (opacity <= 0) {
+      map.removeLayer(marker);
+      mapMarkers.splice(i, 1);
+    } else {
+      marker.setIcon(makeIcon(ev.level, opacity));
+    }
+  }
+}
+
+// ════════════════════════════════════
+// LOG PANEL
+// ════════════════════════════════════
+function ageStr(ts) {
+  const s = Math.round((Date.now() - ts) / 1000);
+  if (s < 60)  return s + 's ago';
+  const m = Math.floor(s / 60);
+  if (m < 60)  return m + 'm ago';
+  return Math.floor(m/60) + 'h ago';
+}
+
+function prependLogRow(ev) {
+  const body = document.getElementById('log-body');
+  const empty = body.querySelector('.log-empty');
+  if (empty) empty.remove();
+
+  const row = document.createElement('div');
+  row.className = `log-row ${ev.level}`;
+  row.dataset.ts = ev.id;
+  row.innerHTML = `
+    <span class="log-time">${ev.ts.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'})}</span>
+    <span class="log-cat ${ev.level}">${ev.level.toUpperCase()}</span>
+    <span class="log-g">${ev.rmsG.toFixed(3)}g</span>
+    <span class="log-age" data-ts="${ev.id}">now</span>
+    <span class="log-pos">${ev.lat.toFixed(4)}° ${ev.lon.toFixed(4)}°</span>
+  `;
+  row.addEventListener('click', () => map.flyTo([ev.lat, ev.lon], 10, {duration:1}));
+  body.insertBefore(row, body.firstChild);
+}
+
+function refreshLogAges() {
+  document.querySelectorAll('.log-age[data-ts]').forEach(el => {
+    el.textContent = ageStr(parseInt(el.dataset.ts));
+  });
+}
+
+// ════════════════════════════════════
+// POSITION MARKER (aircraft icon)
+// ════════════════════════════════════
+function makePosIcon(heading) {
+  const h = heading || 0;
+  // SVG aircraft shape pointing up (north), rotated by heading
+  return L.divIcon({
+    className: '',
+    html: `<div class="pos-marker" style="width:32px;height:32px;transform:rotate(${h}deg)">
+      <svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <!-- aircraft body -->
+        <path d="M16 3 L19 14 L28 18 L28 21 L19 19 L20 27 L23 28 L23 30 L16 28 L9 30 L9 28 L12 27 L13 19 L4 21 L4 18 L13 14 Z"
+              fill="#00d4ff" fill-opacity="0.95"/>
+        <!-- centre dot -->
+        <circle cx="16" cy="16" r="2.5" fill="#ffffff"/>
+      </svg>
+    </div>`,
+    iconSize:   [32, 32],
+    iconAnchor: [16, 16],
+  });
+}
+
+function updatePosMarker(lat, lon, accuracy, heading) {
+  if (!map) return;
+  if (!posMarker) {
+    posMarker = L.marker([lat, lon], {
+      icon: makePosIcon(heading),
+      zIndexOffset: 1000,
+      interactive: false,
+    }).addTo(map);
+
+    // Accuracy circle
+    posAccuracyCircle = L.circle([lat, lon], {
+      radius: accuracy || 50,
+      color: '#00d4ff',
+      fillColor: '#00d4ff',
+      fillOpacity: 0.06,
+      weight: 1,
+      opacity: 0.35,
+      interactive: false,
+    }).addTo(map);
+  } else {
+    posMarker.setLatLng([lat, lon]);
+    posMarker.setIcon(makePosIcon(heading));
+    posAccuracyCircle.setLatLng([lat, lon]);
+    posAccuracyCircle.setRadius(accuracy || 50);
+  }
+}
+
+// ════════════════════════════════════
+// GEOLOCATION
+// ════════════════════════════════════
+function startGPS() {
+  if (!navigator.geolocation) {
+    document.getElementById('iv-pos').textContent = 'NO GPS';
+    return;
+  }
+  let firstFix = true;
+  navigator.geolocation.watchPosition(pos => {
+    const lat = pos.coords.latitude;
+    const lon = pos.coords.longitude;
+    const acc = pos.coords.accuracy;
+    const hdg = pos.coords.heading;  // degrees from north, null if not moving
+
+    gpsPos = { lat, lon };
+    if (hdg !== null && !isNaN(hdg)) gpsHeading = hdg;
+
+    document.getElementById('gps-dot').classList.add('active');
+    document.getElementById('iv-pos').textContent =
+      `${lat.toFixed(4)}°  ${lon.toFixed(4)}°`;
+
+    updatePosMarker(lat, lon, acc, gpsHeading);
+
+    if (firstFix) {
+      firstFix = false;
+      map.setView([lat, lon], 9, {animate:false});
+    } else if (followPosition) {
+      map.panTo([lat, lon], {animate:true, duration:1.5, easeLinearity:0.5});
+    }
+  }, () => {
+    document.getElementById('iv-pos').textContent = 'GPS UNAVAILABLE';
+  }, { enableHighAccuracy: true, maximumAge: 3000, timeout: 15000 });
+}
+
+// ════════════════════════════════════
+// TOUCH SUPPRESSION
+// Marks any touch as "handling" → suppresses turbulence logging
+// for TOUCH_COOL ms afterward.
+// ════════════════════════════════════
+function setupTouchSuppression() {
+  const update = () => { lastTouch = Date.now(); };
+  ['touchstart','touchend','touchmove','mousedown','mouseup'].forEach(ev => {
+    document.addEventListener(ev, update, {passive:true});
+  });
+}
+
+// ════════════════════════════════════
+// MAP INIT — real tiles, touch/pinch enabled
+// ════════════════════════════════════
+const TILE_LAYERS = [
+  {
+    label: 'AERO',
+    url: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
+    opts: { subdomains:'abcd', maxZoom:19, attribution:'© OpenStreetMap, © CARTO' }
+  },
+  {
+    label: 'SAT',
+    url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+    opts: { maxZoom:19, attribution:'© Esri' }
+  },
+  {
+    label: 'TOPO',
+    url: 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',
+    opts: { subdomains:'abc', maxZoom:17, attribution:'© OpenTopoMap' }
+  },
+  {
+    label: 'DARK',
+    url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+    opts: { subdomains:'abcd', maxZoom:19, attribution:'© OpenStreetMap, © CARTO' }
+  },
+];
+let currentLayerIdx = 0;
+let activeLayer = null;
+
+function initMap() {
+  map = L.map('map', {
+    zoomControl:       true,
+    attributionControl: false,
+    touchZoom:         true,
+    dragging:          true,
+    tap:               true,
+    tapTolerance:      15,
+    bounceAtZoomLimits: true,
+  }).setView([60.0, 15.0], 5);
+
+  // Load first tile layer
+  const tl = TILE_LAYERS[0];
+  activeLayer = L.tileLayer(tl.url, tl.opts).addTo(map);
+
+  L.control.attribution({ prefix: tl.opts.attribution, position:'bottomleft' }).addTo(map);
+
+  // When user manually pans/zooms → stop auto-following
+  map.on('dragstart', () => { followPosition = false; });
+  map.on('zoomstart', () => { followPosition = false; });
+
+  // Centre button
+  document.getElementById('center-btn').addEventListener('click', () => {
+    followPosition = true;
+    if (gpsPos) map.flyTo([gpsPos.lat, gpsPos.lon], map.getZoom(), {duration:0.8});
+  });
+
+  // Layer toggle button
+  const layerBtn = document.getElementById('layer-btn');
+  layerBtn.addEventListener('click', () => {
+    currentLayerIdx = (currentLayerIdx + 1) % TILE_LAYERS.length;
+    const next = TILE_LAYERS[currentLayerIdx];
+    map.removeLayer(activeLayer);
+    activeLayer = L.tileLayer(next.url, next.opts).addTo(map);
+    // Keep turbulence markers & position marker on top
+    if (posMarker)        posMarker.bringToFront();
+    if (posAccuracyCircle) posAccuracyCircle.bringToFront();
+    layerBtn.innerHTML = next.label;
+  });
+}
+
+// ════════════════════════════════════
+// APP START
+// ════════════════════════════════════
+async function startApp() {
+  document.getElementById('overlay').style.display = 'none';
+
+  initMap();
+  startGPS();
+  setupTouchSuppression();
+
+  // iOS 13+ requires explicit permission for DeviceMotion
+  if (typeof DeviceMotionEvent !== 'undefined' &&
+      typeof DeviceMotionEvent.requestPermission === 'function') {
+    try {
+      const perm = await DeviceMotionEvent.requestPermission();
+      if (perm === 'granted') {
+        window.addEventListener('devicemotion', onMotion);
+      } else {
+        showSensorError('Motion sensor permission was denied.\nTurbulence detection is unavailable.');
+      }
+    } catch(err) {
+      showSensorError('Could not request motion sensors:\n' + err.message);
+    }
+  } else {
+    // Android or desktop — no permission API needed
+    window.addEventListener('devicemotion', onMotion);
+  }
+
+  // Periodic tasks
+  setInterval(refreshMarkers,  CFG.MARKER_REFRESH);
+  setInterval(refreshLogAges,  15000);
+}
+
+function showSensorError(msg) {
+  const body = document.getElementById('log-body');
+  body.innerHTML = `<div class="log-empty" style="color:var(--red);">⚠ ${msg}</div>`;
+}
+
+// Demo mode for desktop testing (simulates gentle turbulence)
+// Remove or disable this in production EFB deployment
+let demoRunning = false;
+function runDemo() {
+  if (demoRunning) return;
+  demoRunning = true;
+  // Simulate GPS position if none
+  if (!gpsPos) gpsPos = { lat: 60.317, lon: 24.963 };
+
+  let t = 0;
+  const mockMotion = () => {
+    t += 0.05;
+    // Occasional turbulence burst
+    const burst = (Math.sin(t * 0.7) > 0.85) ? 3 : 0.3;
+    const fakeEv = {
+      accelerationIncludingGravity: {
+        x: (Math.sin(t * 11) * burst + Math.random() * 0.2) * 0.5,
+        y: (Math.cos(t * 13) * burst + Math.random() * 0.2) * 0.5,
+        z: 9.81 + Math.sin(t * 7) * burst * 0.3,
+      }
+    };
+    onMotion(fakeEv);
+  };
+  setInterval(mockMotion, 16);
+}
+// Uncomment to test on desktop:
+// document.getElementById('start-btn').addEventListener('click', () => setTimeout(runDemo, 200));
+</script>
+
+<!-- ════════════════════════════════════
+     PWA — service worker registration
+     Enables install-to-home-screen and full offline / in-flight use.
+     ════════════════════════════════════ -->
+<script>
+(function () {
+  if (!('serviceWorker' in navigator)) return;
+
+  // Lightweight toast, styled to match the instrument theme.
+  function toast(msg, onTap) {
+    let t = document.getElementById('sw-toast');
+    if (!t) {
+      t = document.createElement('div');
+      t.id = 'sw-toast';
+      t.style.cssText =
+        'position:fixed;left:50%;bottom:calc(24px + env(safe-area-inset-bottom));' +
+        'transform:translateX(-50%);z-index:10000;max-width:88vw;' +
+        'background:#0d1520;border:1px solid #1a2e44;color:#c8d8e8;' +
+        "font-family:'Share Tech Mono',monospace;font-size:12px;letter-spacing:.5px;" +
+        'padding:10px 16px;border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,.6);' +
+        'text-align:center;';
+      document.body.appendChild(t);
+    }
+    t.textContent = msg;
+    t.style.cursor = onTap ? 'pointer' : 'default';
+    t.style.borderColor = onTap ? '#f0a500' : '#004d5e';
+    t.style.color = onTap ? '#f0a500' : '#00d4ff';
+    t.onclick = onTap || null;
+    t.style.display = 'block';
+    if (!onTap) setTimeout(() => { t.style.display = 'none'; }, 4000);
+  }
+
+  // Whether a SW already controlled this page at load time.
+  // Distinguishes a first install (no reload needed) from an update.
+  const hadController = !!navigator.serviceWorker.controller;
+
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js').then((reg) => {
+      // First install → app is now available offline.
+      if (!hadController) {
+        reg.addEventListener('updatefound', () => {
+          const sw = reg.installing;
+          if (!sw) return;
+          sw.addEventListener('statechange', () => {
+            if (sw.state === 'installed' && !navigator.serviceWorker.controller) {
+              toast('✓ Ready for offline / in-flight use');
+            }
+          });
+        });
+      }
+
+      // A newer version was deployed while the app is open.
+      reg.addEventListener('updatefound', () => {
+        const sw = reg.installing;
+        if (!sw) return;
+        sw.addEventListener('statechange', () => {
+          if (sw.state === 'installed' && navigator.serviceWorker.controller) {
+            toast('↻ Update available — tap to reload', () => {
+              sw.postMessage('SKIP_WAITING');
+            });
+          }
+        });
+      });
+    }).catch((err) => console.warn('SW registration failed:', err));
+
+    // Reload once the new SW takes control — but only for a genuine
+    // update, never on the first install (which claims clients immediately).
+    let reloaded = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (reloaded || !hadController) return;
+      reloaded = true;
+      window.location.reload();
+    });
+  });
+})();
+</script>
+</body>
+</html>
