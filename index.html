@@ -175,6 +175,23 @@ html, body { height:100%; overflow:hidden; background:var(--bg); color:var(--tex
   font-size:10px; letter-spacing:1.5px; color:var(--text-dim);
 }
 .log-count { font-family:var(--mono); color:var(--cyan); }
+.log-tools { display:flex; align-items:center; gap:8px; position:relative; }
+.share-menu {
+  position:absolute; right:0; bottom:calc(100% + 6px);
+  display:flex; flex-direction:column; gap:4px;
+  background:var(--bg3); border:1px solid var(--border);
+  padding:6px; border-radius:5px; z-index:900;
+  box-shadow:0 4px 14px rgba(0,0,0,.6);
+}
+.share-menu[hidden] { display:none; }
+.share-menu .log-btn { min-width:88px; color:var(--cyan); border-color:var(--cyan-dim); }
+.log-btn {
+  background:transparent; border:1px solid var(--border); color:var(--text-dim);
+  font-family:var(--mono); font-size:9px; letter-spacing:1px;
+  padding:3px 8px; border-radius:3px; cursor:pointer; transition:all .15s;
+}
+.log-btn:active { background:var(--border); }
+.log-btn.danger:active { border-color:var(--red); color:var(--red); }
 #log-body { flex:1; overflow-y:auto; padding:4px 0; }
 #log-body::-webkit-scrollbar { width:3px; }
 #log-body::-webkit-scrollbar-track { background:transparent; }
@@ -278,7 +295,17 @@ html, body { height:100%; overflow:hidden; background:var(--bg); color:var(--tex
   <div id="log">
     <div id="log-hdr">
       <span>TURBULENCE EVENT LOG</span>
-      <span class="log-count" id="log-count">0 events</span>
+      <div class="log-tools">
+        <span class="log-count" id="log-count">0 events</span>
+        <button id="load-btn" class="log-btn" title="Import a shared turbulence log (GeoJSON / CSV)">LOAD</button>
+        <button id="share-btn" class="log-btn" title="Share / export the turbulence log">SHARE ▾</button>
+        <button id="clear-btn" class="log-btn danger" title="Clear the turbulence log">CLEAR</button>
+        <input id="import-input" type="file" accept=".geojson,.json,.csv,application/geo+json,application/json,text/csv" hidden>
+        <div id="share-menu" class="share-menu" hidden>
+          <button class="log-btn" data-fmt="csv">CSV</button>
+          <button class="log-btn" data-fmt="geojson">GeoJSON</button>
+        </div>
+      </div>
     </div>
     <div id="log-body">
       <div class="log-empty">No turbulence events recorded.</div>
@@ -343,6 +370,253 @@ let persistCount = 0;
 // Events & markers
 const events  = [];
 const mapMarkers = [];
+
+// ════════════════════════════════════
+// PERSISTENCE
+// The turbulence log is saved locally so it survives a reload or an
+// app relaunch — essential for EFB use across a flight.
+// ════════════════════════════════════
+const STORAGE_KEY = 'pireplog.events.v1';
+const MAX_STORED  = 1000;   // cap persisted history so storage can't grow without bound
+
+function saveEvents() {
+  try {
+    // events is newest-first, so the first MAX_STORED are the most recent.
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(events.slice(0, MAX_STORED)));
+  } catch (e) {
+    // Quota exceeded or storage unavailable (private mode) — non-fatal.
+    console.warn('Could not persist events:', e);
+  }
+}
+
+function loadStoredEvents() {
+  try {
+    const arr = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+    return Array.isArray(arr) ? arr : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+// Re-draw all markers and log rows from the in-memory events array.
+// Shared by restore (from storage) and import (from a shared file).
+function renderAll() {
+  mapMarkers.forEach((m) => map.removeLayer(m.marker));
+  mapMarkers.length = 0;
+
+  const body = document.getElementById('log-body');
+  body.innerHTML = events.length
+    ? ''
+    : '<div class="log-empty">No turbulence events recorded.</div>';
+
+  // Draw oldest-first so prepend leaves the newest on top.
+  events.slice().sort((a, b) => a.id - b.id).forEach((ev) => {
+    const age = Date.now() - ev.id;
+    if (age < CFG.FADE_MS) addMarker(ev, Math.max(0, 1 - age / CFG.FADE_MS));
+    prependLogRow(ev);
+  });
+
+  totalEvents = events.length;
+  document.getElementById('iv-ev').textContent = totalEvents;
+  document.getElementById('log-count').textContent =
+    `${totalEvents} event${totalEvents !== 1 ? 's' : ''}`;
+}
+
+// Rebuild in-memory state from storage on startup.
+function restoreEvents() {
+  const stored = loadStoredEvents();
+  if (!stored.length) return;
+  stored.forEach((raw) => events.push(Object.assign({}, raw, { ts: new Date(raw.id) })));
+  events.sort((a, b) => b.id - a.id);   // newest-first
+  renderAll();
+}
+
+// ════════════════════════════════════
+// EXPORT / SHARE
+// Serialise the turbulence log for sharing with dispatch, other crews or
+// analysis tools. Uses the Web Share API (file share) on iPad/mobile and
+// falls back to a plain download elsewhere.
+// ════════════════════════════════════
+// Chronological (oldest-first) copy — natural reading order for exports.
+function eventsChrono() {
+  return events.slice().sort((a, b) => a.id - b.id);
+}
+
+function eventsToCSV() {
+  const head = 'time_utc,level,rms_g,jerk_g_s,lat,lon';
+  const rows = eventsChrono().map((e) => [
+    new Date(e.id).toISOString(),
+    e.level,
+    e.rmsG.toFixed(3),
+    e.jerkG.toFixed(3),
+    e.lat.toFixed(6),
+    e.lon.toFixed(6),
+  ].join(','));
+  return [head, ...rows].join('\n');
+}
+
+function eventsToGeoJSON() {
+  return JSON.stringify({
+    type: 'FeatureCollection',
+    features: eventsChrono().map((e) => ({
+      type: 'Feature',
+      geometry: { type: 'Point', coordinates: [+e.lon.toFixed(6), +e.lat.toFixed(6)] },
+      properties: {
+        time: new Date(e.id).toISOString(),
+        level: e.level,
+        rms_g: +e.rmsG.toFixed(3),
+        jerk_g_s: +e.jerkG.toFixed(3),
+      },
+    })),
+  }, null, 2);
+}
+
+async function shareLog(fmt) {
+  if (!events.length) { toast('No events to share', null, 'warn'); return; }
+
+  const spec = {
+    csv:     { data: eventsToCSV(),     type: 'text/csv',             ext: 'csv' },
+    geojson: { data: eventsToGeoJSON(), type: 'application/geo+json', ext: 'geojson' },
+  }[fmt];
+  if (!spec) return;
+
+  const stamp = new Date(events[0].id).toISOString().slice(0, 16).replace(/[:T]/g, '-');
+  const fname = `pireplog-${stamp}.${spec.ext}`;
+  const blob  = new Blob([spec.data], { type: spec.type });
+  const file  = new File([blob], fname, { type: spec.type });
+
+  // Preferred path: native share sheet with the file attached (iPad/iOS/Android).
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    try {
+      await navigator.share({
+        files: [file],
+        title: 'PIREPlog turbulence log',
+        text: `${events.length} turbulence event${events.length !== 1 ? 's' : ''}`,
+      });
+      return;
+    } catch (e) {
+      if (e && e.name === 'AbortError') return;   // user dismissed — do nothing
+      // otherwise fall through to download
+    }
+  }
+
+  // Fallback: download the file.
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = fname;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+  toast(`Saved ${fname}`);
+}
+
+// ════════════════════════════════════
+// IMPORT / MERGE
+// Load a turbulence log shared by another crew (GeoJSON or CSV) and merge
+// its events onto this device's map + log — a shared turbulence picture.
+// ════════════════════════════════════
+const VALID_LEVELS = { light: 1, moderate: 1, severe: 1 };
+
+function normLevel(l) {
+  l = String(l || '').trim().toLowerCase();
+  return VALID_LEVELS[l] ? l : 'light';
+}
+
+function parseGeoJSON(obj) {
+  const feats = (obj && Array.isArray(obj.features)) ? obj.features : [];
+  const out = [];
+  feats.forEach((f) => {
+    if (!f || !f.geometry || f.geometry.type !== 'Point') return;
+    const c = f.geometry.coordinates || [];
+    const lon = +c[0], lat = +c[1];
+    if (!isFinite(lat) || !isFinite(lon)) return;
+    const p = f.properties || {};
+    const t = Date.parse(p.time);
+    const id = isFinite(t) ? t : NaN;
+    if (!isFinite(id)) return;
+    out.push({ id, ts: new Date(id), level: normLevel(p.level),
+               rmsG: +p.rms_g || 0, jerkG: +p.jerk_g_s || 0, lat, lon });
+  });
+  return out;
+}
+
+function parseCSV(text) {
+  const lines = text.trim().split(/\r?\n/);
+  if (!lines.length) return [];
+  const start = /lat/i.test(lines[0]) ? 1 : 0;   // skip header row if present
+  const out = [];
+  for (let i = start; i < lines.length; i++) {
+    const cols = lines[i].split(',');
+    if (cols.length < 6) continue;
+    const [time, level, rms, jerk, lat, lon] = cols;
+    const t = Date.parse(time);
+    if (!isFinite(t) || !isFinite(+lat) || !isFinite(+lon)) continue;
+    out.push({ id: t, ts: new Date(t), level: normLevel(level),
+               rmsG: +rms || 0, jerkG: +jerk || 0, lat: +lat, lon: +lon });
+  }
+  return out;
+}
+
+// Merge parsed events into the log, skipping duplicates. Returns count added.
+function mergeEvents(incoming) {
+  const key = (e) => `${e.id}@${e.lat.toFixed(5)},${e.lon.toFixed(5)}`;
+  const seen = new Set(events.map(key));
+  let added = 0;
+  incoming.forEach((ev) => {
+    const k = key(ev);
+    if (seen.has(k)) return;
+    seen.add(k);
+    events.push(ev);
+    added++;
+  });
+  if (added) {
+    events.sort((a, b) => b.id - a.id);   // newest-first
+    renderAll();
+    saveEvents();
+  }
+  return added;
+}
+
+function importFile(file) {
+  const reader = new FileReader();
+  reader.onload = () => {
+    const text = String(reader.result || '');
+    let parsed = [];
+    try {
+      if (/\.csv$/i.test(file.name)) {
+        parsed = parseCSV(text);
+      } else {
+        // Try GeoJSON first, fall back to CSV for mislabelled files.
+        try { parsed = parseGeoJSON(JSON.parse(text)); }
+        catch (e) { parsed = parseCSV(text); }
+      }
+    } catch (e) {
+      toast('Could not read that file', null, 'warn');
+      return;
+    }
+    if (!parsed.length) { toast('No turbulence events in file', null, 'warn'); return; }
+    const added = mergeEvents(parsed);
+    toast(added ? `✓ Imported ${added} event${added !== 1 ? 's' : ''}`
+                : 'Already up to date — nothing new');
+  };
+  reader.onerror = () => toast('Could not read that file', null, 'warn');
+  reader.readAsText(file);
+}
+
+// Wipe the log everywhere: memory, map, panel and storage.
+function clearLog() {
+  events.length = 0;
+  mapMarkers.forEach((m) => map.removeLayer(m.marker));
+  mapMarkers.length = 0;
+  totalEvents = 0;
+  document.getElementById('iv-ev').textContent = '0';
+  document.getElementById('log-count').textContent = '0 events';
+  document.getElementById('log-body').innerHTML =
+    '<div class="log-empty">No turbulence events recorded.</div>';
+  try { localStorage.removeItem(STORAGE_KEY); } catch (e) { /* ignore */ }
+}
 
 // ════════════════════════════════════
 // HIGH-PASS FILTER
@@ -497,6 +771,7 @@ function logEvent(level, rmsG, jerkG) {
 
   addMarker(ev);
   prependLogRow(ev);
+  saveEvents();
   // Fly to event only if not already following position
   if (!followPosition) map.panTo([ev.lat, ev.lon], {animate:true, duration:0.5});
 }
@@ -524,8 +799,8 @@ function makeIcon(level, opacity) {
   });
 }
 
-function addMarker(ev) {
-  const marker = L.marker([ev.lat, ev.lon], { icon: makeIcon(ev.level, 1.0) })
+function addMarker(ev, opacity = 1.0) {
+  const marker = L.marker([ev.lat, ev.lon], { icon: makeIcon(ev.level, opacity) })
     .bindPopup(buildPopup(ev), {className:'turb-popup'})
     .addTo(map);
   mapMarkers.push({ marker, ev });
@@ -763,6 +1038,31 @@ function initMap() {
 
   // Preload / "save area" button
   document.getElementById('preload-btn').addEventListener('click', preloadCurrentArea);
+
+  // Clear-log button
+  document.getElementById('clear-btn').addEventListener('click', () => {
+    if (!events.length || confirm('Clear all logged turbulence events?')) clearLog();
+  });
+
+  // Import (LOAD) button → hidden file input
+  const importInput = document.getElementById('import-input');
+  document.getElementById('load-btn').addEventListener('click', () => importInput.click());
+  importInput.addEventListener('change', () => {
+    if (importInput.files && importInput.files[0]) importFile(importInput.files[0]);
+    importInput.value = '';   // allow re-importing the same file
+  });
+
+  // Share / export menu
+  const shareBtn  = document.getElementById('share-btn');
+  const shareMenu = document.getElementById('share-menu');
+  shareBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    shareMenu.hidden = !shareMenu.hidden;
+  });
+  shareMenu.querySelectorAll('[data-fmt]').forEach((b) => {
+    b.addEventListener('click', () => { shareMenu.hidden = true; shareLog(b.dataset.fmt); });
+  });
+  document.addEventListener('click', () => { shareMenu.hidden = true; });
 }
 
 // ════════════════════════════════════
@@ -913,6 +1213,7 @@ async function startApp() {
   document.getElementById('overlay').style.display = 'none';
 
   initMap();
+  restoreEvents();   // repopulate log + markers saved from a previous session
   startGPS();
   setupTouchSuppression();
 

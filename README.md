@@ -13,11 +13,34 @@ Uses iPad accelerometers and GPS to detect, categorise, and georeference turbule
 - **Handling suppression**: touch events suppress false positives for 3.5 s
 - **Pinch-zoom and touch-pan** map navigation
 - **Installable PWA** — runs full-screen and works offline / in-flight (no a-Shell needed)
+- **Persistent log** — turbulence events are saved locally and restored after a
+  reload or app relaunch
+- **Share / export** the log as **CSV** or **GeoJSON** (native iPad share sheet,
+  with download fallback)
+- **Import / merge** a log shared by another crew (GeoJSON or CSV) onto your own
+  map and log
 
 ## Usage
 
 Open `https://krytkonen.github.io/turbulence-tracker/` in Safari on iPad.  
 Tap **Enable Sensors** and allow both motion and location permissions.
+
+## Sharing turbulence data
+
+The event log (below the map) has a small toolbar:
+
+- **LOAD** — import a turbulence log another crew shared with you (`.geojson` or
+  `.csv`); its events are merged onto your map and log, with duplicates skipped.
+- **SHARE ▾** — export your log as **CSV** (analysis/spreadsheets) or
+  **GeoJSON** (other mapping/EFB tools). On iPad this opens the native share
+  sheet (Messages, Mail, AirDrop, Files); elsewhere it downloads the file.
+- **CLEAR** — wipe the log (with confirmation).
+
+Exchange flow: crew A taps **SHARE → GeoJSON** and AirDrops/messages the file;
+crew B taps **LOAD** and picks it — A's turbulence now shows on B's map. This
+works fully offline (e.g. AirDrop between two iPads). Live server-based
+telemetry between aircraft would need a network backend and is out of scope for
+this static, offline-first app.
 
 ## Install as an app (offline / in-flight)
 
