@@ -1,0 +1,28 @@
+PIREPlog — Proprietary Software License
+Copyright (c) 2026 Kalle Rytkönen. All rights reserved.
+
+This software, including its source code, assets, and documentation (the
+"Software"), is the exclusive property of the copyright holder. The Software is
+made source-available on GitHub for reference and transparency only.
+
+No license or right to use, copy, reproduce, modify, adapt, merge, publish,
+distribute, sublicense, sell, or create derivative works from any part of the
+Software is granted, whether express or implied, except under a separate written
+agreement signed by the copyright holder.
+
+Viewing this repository — including through its public hosting on GitHub or the
+delivery of client-side code to a web browser — does not grant any rights to the
+Software. Any use, reproduction, or distribution without prior written
+permission is strictly prohibited.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT. IN NO EVENT SHALL THE COPYRIGHT
+HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT, OR OTHERWISE, ARISING FROM, OUT OF, OR IN CONNECTION WITH THE
+SOFTWARE OR ITS USE.
+
+It is also an advisory / experimental tool and must not be used as a certified
+instrument or as a sole source for operational flight decisions.
+
+For licensing inquiries, contact: kalle.rytkonen@suomenkonehalli.fi

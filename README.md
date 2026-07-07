@@ -48,11 +48,13 @@ works fully offline (e.g. AirDrop between two iPads).
 ## Push alerts (optional backend)
 
 The 🔔 button (top-right) subscribes the device to **severe-turbulence push
-alerts** delivered by a small Cloudflare Worker in [`backend/`](backend/). Push
-rides the platform push channel, so it works in flight even where the wifi
-allowlist blocks the data domain. Add PIREPlog to the Home Screen, open it, tap
-🔔, paste the Worker URL and **Enable alerts**. See
-[`backend/README.md`](backend/README.md) for deployment.
+alerts** delivered by a small Cloudflare Worker. Push rides the platform push
+channel, so it works in flight even where the wifi allowlist blocks the data
+domain. Add PIREPlog to the Home Screen, open it, tap 🔔, paste the Worker URL
+and **Enable alerts**.
+
+The backend (Cloudflare Worker) lives in a **separate private repository**
+(`pireplog-push`); only the public VAPID key ships in this client.
 
 Server-based live data sync between aircraft (a `/events` API) is a planned next
 phase; it depends on the operator's in-flight wifi allowlist.
