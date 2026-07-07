@@ -18,7 +18,7 @@ ADMIN_CONTACT = "mailto:ops@example.com"
 #   wrangler kv namespace create SUBSCRIPTIONS
 [[kv_namespaces]]
 binding = "SUBSCRIPTIONS"
-id = "REPLACE_WITH_KV_NAMESPACE_ID"
+id = "b221df5572b8458099b145dd1ce533a0"
 
 # ── Optional: fire a scheduled test push near your flight time (UTC) ──
 # [triggers]

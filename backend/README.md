@@ -43,7 +43,9 @@ npx wrangler login
      (`PUSH_PUBLIC_KEY` near the top of `../index.html`). They must match.
    - Store the private key as a secret (next step). **Never commit it.**
 
-2. **Create the KV namespace** and paste its id into `wrangler.toml`:
+2. **KV namespace** — already created (`pireplog-subscriptions`) and its id is
+   filled into `wrangler.toml`. If you deploy to a different account, recreate
+   it and update the id:
 
    ```bash
    npx wrangler kv namespace create SUBSCRIPTIONS
