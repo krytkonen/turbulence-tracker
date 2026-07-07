@@ -8,6 +8,10 @@ wifi allowlist blocks the data domain**.
 > Data sync (`/events` + D1) is intentionally not here yet — it depends on the
 > in-flight wifi allowlist and is a later phase.
 
+Push encryption is **RFC 8291 `aes128gcm`** (required by Apple; the legacy
+`aesgcm` scheme is rejected), implemented in [`src/push.js`](src/push.js) with
+pure Web Crypto — **no runtime dependencies** (only `wrangler` for deploy).
+
 ## Endpoints
 
 | Method | Path              | Purpose                                   |

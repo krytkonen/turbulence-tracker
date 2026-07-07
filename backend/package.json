@@ -9,9 +9,6 @@
     "dev": "wrangler dev",
     "deploy": "wrangler deploy"
   },
-  "dependencies": {
-    "webpush-webcrypto": "^1.0.5"
-  },
   "devDependencies": {
     "wrangler": "^3.90.0"
   }

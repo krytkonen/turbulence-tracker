@@ -14,7 +14,7 @@
 // Data sync (POST/GET /events with D1) is deliberately NOT here yet — it
 // depends on the wifi allowlist decision and is a later phase.
 // ════════════════════════════════════════════════════════════════
-import { ApplicationServerKeys, generatePushHTTPRequest } from 'webpush-webcrypto';
+import { sendPush } from './push.js';
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -28,34 +28,18 @@ const json = (obj, status = 200) =>
     headers: { 'Content-Type': 'application/json', ...CORS },
   });
 
-function vapidKeys(env) {
-  return ApplicationServerKeys.fromJSON({
-    publicKey: env.VAPID_PUBLIC_KEY,
-    privateKey: env.VAPID_PRIVATE_KEY,
-  });
-}
-
 // Stable KV key derived from the (unguessable) subscription endpoint.
 function subKey(sub) {
   return 'sub:' + btoa(sub.endpoint).replace(/[^a-zA-Z0-9]/g, '').slice(-160);
 }
 
-async function pushTo(env, keys, sub, payloadObj) {
-  const { endpoint, headers, body } = await generatePushHTTPRequest({
-    applicationServerKeys: keys,
-    payload: JSON.stringify(payloadObj),
-    target: sub,
-    adminContact: env.ADMIN_CONTACT || 'mailto:ops@example.com',
-    ttl: 3600,
-    urgency: 'high',
-  });
-  const res = await fetch(endpoint, { method: 'POST', headers, body });
-  return res.status;
-}
-
 // Fan a payload out to every stored subscription; prune expired ones.
 async function broadcast(env, payloadObj) {
-  const keys = await vapidKeys(env);
+  const vapid = {
+    publicKey: env.VAPID_PUBLIC_KEY,
+    privateKey: env.VAPID_PRIVATE_KEY,
+    subject: env.ADMIN_CONTACT || 'mailto:ops@example.com',
+  };
   const list = await env.SUBSCRIPTIONS.list({ prefix: 'sub:' });
   let sent = 0, removed = 0, failed = 0;
   for (const k of list.keys) {
@@ -63,7 +47,7 @@ async function broadcast(env, payloadObj) {
     if (!raw) continue;
     const sub = JSON.parse(raw);
     try {
-      const status = await pushTo(env, keys, sub, payloadObj);
+      const status = await sendPush(sub, payloadObj, vapid);
       if (status === 200 || status === 201) sent++;
       else if (status === 404 || status === 410) { await env.SUBSCRIPTIONS.delete(k.name); removed++; }
       else failed++;

@@ -5,7 +5,7 @@ compatibility_date = "2024-11-01"
 # ── Public config (safe to commit) ───────────────────────────────
 [vars]
 # VAPID public key — must match PUSH_PUBLIC_KEY in the PWA (index.html).
-VAPID_PUBLIC_KEY = "BKwctZH-0gvMFO6tt5qZAkEiOIietb5sgxUgZAjgGiam1PXqnZSQYYmjktTJa4Xrp5D_YMnweq8cwzk_BT0huCg"
+VAPID_PUBLIC_KEY = "BPglo8YU-D0XfYLwL88e0RJ2sjioQL8yKaSdu7M9HVauQOheaJE5XSOBh8iAIpLuoQjd61DAroG90YtT8o5Hn6w"
 # Contact address included in VAPID (RFC 8292). Use your own.
 ADMIN_CONTACT = "mailto:ops@example.com"
 
