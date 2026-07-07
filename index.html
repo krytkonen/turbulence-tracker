@@ -236,7 +236,7 @@ html, body { height:100%; overflow:hidden; background:var(--bg); color:var(--tex
 #log-body::-webkit-scrollbar-track { background:transparent; }
 #log-body::-webkit-scrollbar-thumb { background:var(--border); }
 .log-row {
-  display:grid; grid-template-columns:64px 84px 58px 52px 1fr;
+  display:grid; grid-template-columns:60px 80px 52px 46px 1fr 58px;
   gap:4px; padding:5px 12px; font-family:var(--mono); font-size:11px;
   border-left:3px solid transparent; margin:1px 0;
   align-items:center;
@@ -252,6 +252,7 @@ html, body { height:100%; overflow:hidden; background:var(--bg); color:var(--tex
 .log-g    { color:var(--cyan); }
 .log-age  { color:var(--text-dim); font-size:10px; }
 .log-pos  { color:var(--text-dim); font-size:10px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.log-alt  { color:var(--cyan); font-size:10px; text-align:right; white-space:nowrap; }
 .log-empty { padding:16px 12px; font-family:var(--mono); font-size:11px; color:var(--text-dim); }
 
 /* ── HANDLING BADGE ── */
@@ -320,6 +321,10 @@ html, body { height:100%; overflow:hidden; background:var(--bg); color:var(--tex
     <div class="inst">
       <div class="inst-label">EVENTS</div>
       <div class="inst-value" id="iv-ev">0</div>
+    </div>
+    <div class="inst">
+      <div class="inst-label">ALT (GPS)</div>
+      <div class="inst-value" id="iv-alt" style="font-size:13px;padding-top:2px;">—</div>
     </div>
     <div class="inst" style="flex:2">
       <div class="inst-label">
@@ -508,7 +513,7 @@ function eventsChrono() {
 }
 
 function eventsToCSV() {
-  const head = 'time_utc,level,rms_g,jerk_g_s,lat,lon';
+  const head = 'time_utc,level,rms_g,jerk_g_s,lat,lon,alt_ft';
   const rows = eventsChrono().map((e) => [
     new Date(e.id).toISOString(),
     e.level,
@@ -516,6 +521,7 @@ function eventsToCSV() {
     e.jerkG.toFixed(3),
     e.lat.toFixed(6),
     e.lon.toFixed(6),
+    altFt(e.alt) === null ? '' : Math.round(altFt(e.alt)),
   ].join(','));
   return [head, ...rows].join('\n');
 }
@@ -525,12 +531,20 @@ function eventsToGeoJSON() {
     type: 'FeatureCollection',
     features: eventsChrono().map((e) => ({
       type: 'Feature',
-      geometry: { type: 'Point', coordinates: [+e.lon.toFixed(6), +e.lat.toFixed(6)] },
+      // GeoJSON (RFC 7946) allows an optional third coordinate — elevation in
+      // metres. Include it when known, and mirror it as alt_ft for readability.
+      geometry: {
+        type: 'Point',
+        coordinates: (e.alt === null || e.alt === undefined || !isFinite(e.alt))
+          ? [+e.lon.toFixed(6), +e.lat.toFixed(6)]
+          : [+e.lon.toFixed(6), +e.lat.toFixed(6), +e.alt.toFixed(1)],
+      },
       properties: {
         time: new Date(e.id).toISOString(),
         level: e.level,
         rms_g: +e.rmsG.toFixed(3),
         jerk_g_s: +e.jerkG.toFixed(3),
+        alt_ft: altFt(e.alt) === null ? null : Math.round(altFt(e.alt)),
       },
     })),
   }, null, 2);
@@ -601,8 +615,12 @@ function parseGeoJSON(obj) {
     const t = Date.parse(p.time);
     const id = isFinite(t) ? t : NaN;
     if (!isFinite(id)) return;
+    // Altitude: prefer the 3rd coordinate (metres); else alt_ft property (feet).
+    const alt = (c.length > 2 && isFinite(+c[2])) ? +c[2]
+              : (p.alt_ft !== undefined && p.alt_ft !== null && isFinite(+p.alt_ft)) ? +p.alt_ft / M_TO_FT
+              : null;
     out.push({ id, ts: new Date(id), level: normLevel(p.level),
-               rmsG: +p.rms_g || 0, jerkG: +p.jerk_g_s || 0, lat, lon });
+               rmsG: +p.rms_g || 0, jerkG: +p.jerk_g_s || 0, lat, lon, alt });
   });
   return out;
 }
@@ -615,11 +633,14 @@ function parseCSV(text) {
   for (let i = start; i < lines.length; i++) {
     const cols = lines[i].split(',');
     if (cols.length < 6) continue;
-    const [time, level, rms, jerk, lat, lon] = cols;
+    const [time, level, rms, jerk, lat, lon, altFtStr] = cols;
     const t = Date.parse(time);
     if (!isFinite(t) || !isFinite(+lat) || !isFinite(+lon)) continue;
+    // alt_ft column is optional (older logs have 6 columns) — feet → metres.
+    const alt = (altFtStr !== undefined && String(altFtStr).trim() !== '' && isFinite(+altFtStr))
+      ? +altFtStr / M_TO_FT : null;
     out.push({ id: t, ts: new Date(t), level: normLevel(level),
-               rmsG: +rms || 0, jerkG: +jerk || 0, lat: +lat, lon: +lon });
+               rmsG: +rms || 0, jerkG: +jerk || 0, lat: +lat, lon: +lon, alt });
   }
   return out;
 }
@@ -817,6 +838,27 @@ function setPill(level) {
 }
 
 // ════════════════════════════════════
+// ALTITUDE
+// GPS reports altitude in metres above the WGS84 ellipsoid (or null when the
+// fix has no vertical component). Aviation reads feet and flight levels, so we
+// store the raw metres on each event and format on display. This is GPS-derived
+// geometric altitude, not pressure altitude — it is always labelled "GPS" and
+// the flight level shown with a "~" so it is never mistaken for an assigned FL.
+// ════════════════════════════════════
+const M_TO_FT = 3.280839895;
+function altFt(alt) {
+  return (alt === null || alt === undefined || !isFinite(alt)) ? null : alt * M_TO_FT;
+}
+function fmtAlt(alt) {
+  const ft = altFt(alt);
+  return ft === null ? '—' : Math.round(ft).toLocaleString('en-US') + ' ft';
+}
+function fmtFL(alt) {
+  const ft = altFt(alt);
+  return ft === null ? null : 'FL' + String(Math.round(ft / 100)).padStart(3, '0');
+}
+
+// ════════════════════════════════════
 // EVENT LOGGING
 // ════════════════════════════════════
 function logEvent(level, rmsG, jerkG) {
@@ -831,6 +873,7 @@ function logEvent(level, rmsG, jerkG) {
     level, rmsG, jerkG,
     lat:   gpsPos.lat,
     lon:   gpsPos.lon,
+    alt:   gpsPos.alt,   // metres (GPS), null if unavailable
   };
   events.unshift(ev);
 
@@ -882,7 +925,8 @@ function buildPopup(ev) {
       RMS&nbsp;&nbsp; ${ev.rmsG.toFixed(3)} g<br>
       JERK&nbsp; ${ev.jerkG.toFixed(3)} g/s<br>
       LAT&nbsp;&nbsp; ${ev.lat.toFixed(5)}°<br>
-      LON&nbsp;&nbsp; ${ev.lon.toFixed(5)}°
+      LON&nbsp;&nbsp; ${ev.lon.toFixed(5)}°<br>
+      ALT&nbsp;&nbsp; ${fmtAlt(ev.alt)}${fmtFL(ev.alt) ? ' · ~' + fmtFL(ev.alt) : ''} <span style="color:#7a8a9a;">GPS</span>
     </div>
   </div>`;
 }
@@ -926,6 +970,7 @@ function prependLogRow(ev) {
     <span class="log-g">${ev.rmsG.toFixed(3)}g</span>
     <span class="log-age" data-ts="${ev.id}">now</span>
     <span class="log-pos">${ev.lat.toFixed(4)}° ${ev.lon.toFixed(4)}°</span>
+    <span class="log-alt">${fmtFL(ev.alt) || '—'}</span>
   `;
   row.addEventListener('click', () => map.flyTo([ev.lat, ev.lon], 10, {duration:1}));
   body.insertBefore(row, body.firstChild);
@@ -992,6 +1037,7 @@ function updatePosMarker(lat, lon, accuracy, heading) {
 function startGPS() {
   if (!navigator.geolocation) {
     document.getElementById('iv-pos').textContent = 'NO GPS';
+    document.getElementById('iv-alt').textContent = '—';
     return;
   }
   let firstFix = true;
@@ -999,14 +1045,16 @@ function startGPS() {
     const lat = pos.coords.latitude;
     const lon = pos.coords.longitude;
     const acc = pos.coords.accuracy;
+    const alt = pos.coords.altitude;  // metres above WGS84 ellipsoid, null if unavailable
     const hdg = pos.coords.heading;  // degrees from north, null if not moving
 
-    gpsPos = { lat, lon };
+    gpsPos = { lat, lon, alt };
     if (hdg !== null && !isNaN(hdg)) gpsHeading = hdg;
 
     document.getElementById('gps-dot').classList.add('active');
     document.getElementById('iv-pos').textContent =
       `${lat.toFixed(4)}°  ${lon.toFixed(4)}°`;
+    document.getElementById('iv-alt').textContent = fmtAlt(alt);
 
     updatePosMarker(lat, lon, acc, gpsHeading);
 
@@ -1018,6 +1066,7 @@ function startGPS() {
     }
   }, () => {
     document.getElementById('iv-pos').textContent = 'GPS UNAVAILABLE';
+    document.getElementById('iv-alt').textContent = '—';
   }, { enableHighAccuracy: true, maximumAge: 3000, timeout: 15000 });
 }
 
@@ -1428,7 +1477,7 @@ function runDemo() {
   if (demoRunning) return;
   demoRunning = true;
   // Simulate GPS position if none
-  if (!gpsPos) gpsPos = { lat: 60.317, lon: 24.963 };
+  if (!gpsPos) gpsPos = { lat: 60.317, lon: 24.963, alt: null };
 
   let t = 0;
   const mockMotion = () => {
