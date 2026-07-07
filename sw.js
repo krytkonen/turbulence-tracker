@@ -8,7 +8,7 @@
 //    so any area viewed while online stays available offline.
 // ════════════════════════════════════════════════════════════════
 
-const VERSION    = 'v1';
+const VERSION    = 'v2';
 const SHELL_CACHE = `pireplog-shell-${VERSION}`;
 const TILE_CACHE  = `pireplog-tiles-${VERSION}`;
 const FONT_CACHE  = `pireplog-fonts-${VERSION}`;
@@ -76,6 +76,39 @@ self.addEventListener('message', (event) => {
   if (data && data.type === 'PRELOAD_TILES' && Array.isArray(data.urls)) {
     event.waitUntil(preloadTiles(data.urls, event.source));
   }
+});
+
+// ── PUSH ── show turbulence alerts pushed from the backend ───────
+self.addEventListener('push', (event) => {
+  let data = {};
+  try { data = event.data ? event.data.json() : {}; }
+  catch (e) { data = { body: event.data ? event.data.text() : '' }; }
+
+  const title = data.title || 'PIREPlog';
+  const options = {
+    body: data.body || 'Turbulence alert',
+    icon: './icons/icon-192.png',
+    badge: './icons/icon-192.png',
+    tag: data.tag || 'pirep-alert',
+    renotify: true,
+    requireInteraction: false,
+    data: { url: data.url || './' },
+  };
+  event.waitUntil(self.registration.showNotification(title, options));
+});
+
+// Tapping a notification focuses the app (or opens it).
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const target = (event.notification.data && event.notification.data.url) || './';
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((list) => {
+      for (const c of list) {
+        if ('focus' in c) return c.focus();
+      }
+      if (self.clients.openWindow) return self.clients.openWindow(target);
+    })
+  );
 });
 
 // Fetch every tile URL (in bounded batches) into the un-evicted preload

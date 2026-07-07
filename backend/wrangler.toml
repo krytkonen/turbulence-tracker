@@ -1,0 +1,25 @@
+name = "pireplog-push"
+main = "src/index.js"
+compatibility_date = "2024-11-01"
+
+# ── Public config (safe to commit) ───────────────────────────────
+[vars]
+# VAPID public key — must match PUSH_PUBLIC_KEY in the PWA (index.html).
+VAPID_PUBLIC_KEY = "BKwctZH-0gvMFO6tt5qZAkEiOIietb5sgxUgZAjgGiam1PXqnZSQYYmjktTJa4Xrp5D_YMnweq8cwzk_BT0huCg"
+# Contact address included in VAPID (RFC 8292). Use your own.
+ADMIN_CONTACT = "mailto:ops@example.com"
+
+# ── Secrets (DO NOT put here — set with `wrangler secret put`) ────
+#   wrangler secret put VAPID_PRIVATE_KEY      (required)
+#   wrangler secret put API_KEY                (optional; guards /test and /alert)
+
+# ── KV: stores push subscriptions ────────────────────────────────
+# Create it once, then paste the id below:
+#   wrangler kv namespace create SUBSCRIPTIONS
+[[kv_namespaces]]
+binding = "SUBSCRIPTIONS"
+id = "REPLACE_WITH_KV_NAMESPACE_ID"
+
+# ── Optional: fire a scheduled test push near your flight time (UTC) ──
+# [triggers]
+# crons = ["30 12 * * *"]

@@ -1,0 +1,7 @@
+# Never commit secrets or local state
+node_modules/
+.dev.vars
+.dev.vars.*
+.wrangler/
+dist/
+*.log

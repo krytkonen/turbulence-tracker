@@ -3,6 +3,11 @@
 Real-time turbulence detection and mapping for iPad EFB use.  
 Uses iPad accelerometers and GPS to detect, categorise, and georeference turbulence events.
 
+> **Advisory / experimental.** PIREPlog is a situational-awareness aid, not a
+> certified instrument. Do not use it for primary navigation, separation, or as
+> a sole source for operational decisions. Shared/received turbulence data is
+> unverified.
+
 ## Features
 
 - **Turbulence detection** via high-pass filtered accelerometer data
@@ -38,9 +43,19 @@ The event log (below the map) has a small toolbar:
 
 Exchange flow: crew A taps **SHARE → GeoJSON** and AirDrops/messages the file;
 crew B taps **LOAD** and picks it — A's turbulence now shows on B's map. This
-works fully offline (e.g. AirDrop between two iPads). Live server-based
-telemetry between aircraft would need a network backend and is out of scope for
-this static, offline-first app.
+works fully offline (e.g. AirDrop between two iPads).
+
+## Push alerts (optional backend)
+
+The 🔔 button (top-right) subscribes the device to **severe-turbulence push
+alerts** delivered by a small Cloudflare Worker in [`backend/`](backend/). Push
+rides the platform push channel, so it works in flight even where the wifi
+allowlist blocks the data domain. Add PIREPlog to the Home Screen, open it, tap
+🔔, paste the Worker URL and **Enable alerts**. See
+[`backend/README.md`](backend/README.md) for deployment.
+
+Server-based live data sync between aircraft (a `/events` API) is a planned next
+phase; it depends on the operator's in-flight wifi allowlist.
 
 ## Install as an app (offline / in-flight)
 

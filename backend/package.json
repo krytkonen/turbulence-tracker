@@ -1,0 +1,18 @@
+{
+  "name": "pireplog-push",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "PIREPlog Web Push backend (Cloudflare Worker)",
+  "scripts": {
+    "keys": "node scripts/gen-keys.mjs",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "dependencies": {
+    "webpush-webcrypto": "^1.0.5"
+  },
+  "devDependencies": {
+    "wrangler": "^3.90.0"
+  }
+}

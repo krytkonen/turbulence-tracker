@@ -98,6 +98,45 @@ html, body { height:100%; overflow:hidden; background:var(--bg); color:var(--tex
 .pill-severe   { border-color:#7a0010;           color:var(--red);    background:rgba(255,23,68,0.12);
                  animation:flash .4s ease-in-out infinite alternate; }
 @keyframes flash { from{background:rgba(255,23,68,0.12)} to{background:rgba(255,23,68,0.28)} }
+.hdr-right { display:flex; align-items:center; gap:10px; }
+#alerts-btn {
+  background:transparent; border:1px solid var(--border); color:var(--text);
+  font-size:15px; width:34px; height:30px; border-radius:5px; cursor:pointer;
+  display:flex; align-items:center; justify-content:center; transition:all .15s; line-height:1;
+}
+#alerts-btn:active { background:var(--border); }
+#alerts-btn.on { border-color:var(--green-dim); box-shadow:0 0 8px rgba(0,230,118,.4); }
+
+/* ── SETTINGS / ALERTS PANEL ── */
+#settings-panel {
+  position:fixed; inset:0; z-index:9000; display:none;
+  align-items:center; justify-content:center; padding:20px;
+  background:rgba(4,7,10,0.72);
+}
+#settings-panel.open { display:flex; }
+.settings-card {
+  background:var(--bg2); border:1px solid var(--border); border-radius:8px;
+  width:100%; max-width:420px; padding:20px; display:flex; flex-direction:column; gap:14px;
+  box-shadow:0 10px 40px rgba(0,0,0,.6);
+}
+.settings-card h2 { font-size:15px; color:var(--cyan); letter-spacing:2px; font-weight:700; }
+.settings-close { align-self:flex-end; background:none; border:none; color:var(--text-dim); font-size:22px; cursor:pointer; margin:-10px -6px -14px 0; line-height:1; }
+.settings-row { display:flex; flex-direction:column; gap:6px; }
+.settings-row label { font-size:10px; color:var(--text-dim); letter-spacing:1px; text-transform:uppercase; }
+.settings-row input {
+  background:var(--bg); border:1px solid var(--border); color:var(--text);
+  font-family:var(--mono); font-size:13px; padding:9px 10px; border-radius:5px; width:100%;
+}
+.settings-actions { display:flex; gap:8px; flex-wrap:wrap; }
+.settings-btn {
+  flex:1; min-width:120px; background:transparent; border:1px solid var(--cyan); color:var(--cyan);
+  font-family:var(--sans); font-weight:600; font-size:13px; letter-spacing:1px;
+  padding:10px; border-radius:5px; cursor:pointer; transition:all .15s;
+}
+.settings-btn:active { background:var(--cyan); color:var(--bg); }
+.settings-btn.ghost { border-color:var(--border); color:var(--text-dim); }
+.settings-status { font-family:var(--mono); font-size:11px; color:var(--cyan); min-height:14px; }
+.settings-note { font-size:11px; color:var(--text-dim); line-height:1.6; }
 
 /* ── INSTRUMENT BAR ── */
 #ibar {
@@ -261,7 +300,10 @@ html, body { height:100%; overflow:hidden; background:var(--bg); color:var(--tex
 
   <div id="hdr">
     <div class="hdr-logo">PIREP<span>log</span></div>
-    <div id="turb-pill" class="pill-smooth">● SMOOTH AIR</div>
+    <div class="hdr-right">
+      <div id="turb-pill" class="pill-smooth">● SMOOTH AIR</div>
+      <button id="alerts-btn" title="Turbulence alerts &amp; sharing">🔔</button>
+    </div>
   </div>
 
   <div id="ibar">
@@ -315,6 +357,29 @@ html, body { height:100%; overflow:hidden; background:var(--bg); color:var(--tex
 </div>
 
 <div id="handling-badge">⊘ HANDLING — SUPPRESSED</div>
+
+<!-- ALERTS / SHARING SETTINGS -->
+<div id="settings-panel">
+  <div class="settings-card">
+    <button class="settings-close" id="settings-close" title="Close">×</button>
+    <h2>ALERTS &amp; SHARING</h2>
+    <div class="settings-row">
+      <label for="cfg-api">Backend URL (Cloudflare Worker)</label>
+      <input id="cfg-api" type="url" inputmode="url" autocomplete="off" spellcheck="false"
+             placeholder="https://pireplog-push.&lt;you&gt;.workers.dev">
+    </div>
+    <div class="settings-actions">
+      <button class="settings-btn" id="cfg-alerts">Enable alerts</button>
+      <button class="settings-btn ghost" id="cfg-test">Send test</button>
+    </div>
+    <div class="settings-status" id="cfg-status"></div>
+    <div class="settings-note">
+      Severe-turbulence push alerts. On iPad, add PIREPlog to the Home Screen and
+      open it from there for alerts to work. Enable on the ground — delivery still
+      works in flight over the device's push channel.
+    </div>
+  </div>
+</div>
 
 <script>
 // ════════════════════════════════════
@@ -1207,6 +1272,116 @@ function toast(msg, onTap, kind) {
 }
 
 // ════════════════════════════════════
+// ALERTS / CONFIG (Web Push)
+// Subscribes the device to severe-turbulence push alerts via the backend.
+// Push rides the platform push channel, so it works in flight even where
+// the wifi allowlist blocks the data domain.
+// ════════════════════════════════════
+// VAPID public key — pairs with the backend's private key.
+// TEST KEY: regenerate your own before production (see backend/README.md).
+const PUSH_PUBLIC_KEY = 'BKwctZH-0gvMFO6tt5qZAkEiOIietb5sgxUgZAjgGiam1PXqnZSQYYmjktTJa4Xrp5D_YMnweq8cwzk_BT0huCg';
+const CONFIG_KEY = 'pireplog.config.v1';
+
+function getConfig() { try { return JSON.parse(localStorage.getItem(CONFIG_KEY) || '{}'); } catch (e) { return {}; } }
+function setConfig(c) { try { localStorage.setItem(CONFIG_KEY, JSON.stringify(c)); } catch (e) { /* ignore */ } }
+function apiBase() { return (getConfig().apiBase || '').trim().replace(/\/+$/, ''); }
+function setStatus(msg) { const el = document.getElementById('cfg-status'); if (el) el.textContent = msg || ''; }
+
+function urlB64ToUint8Array(b64) {
+  const pad = '='.repeat((4 - (b64.length % 4)) % 4);
+  const s = (b64 + pad).replace(/-/g, '+').replace(/_/g, '/');
+  const raw = atob(s);
+  return Uint8Array.from(Array.from(raw, (c) => c.charCodeAt(0)));
+}
+
+function reflectAlertsState() {
+  const on = !!getConfig().alerts;
+  const btn = document.getElementById('cfg-alerts'); if (btn) btn.textContent = on ? 'Disable alerts' : 'Enable alerts';
+  const bell = document.getElementById('alerts-btn'); if (bell) bell.classList.toggle('on', on);
+}
+
+async function enableAlerts() {
+  if (!apiBase()) { setStatus('Set the backend URL first.'); return; }
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) { setStatus('Push not supported on this device.'); return; }
+  const standalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+  let perm = Notification.permission;
+  if (perm !== 'granted') perm = await Notification.requestPermission();
+  if (perm !== 'granted') {
+    setStatus(standalone ? 'Notifications not allowed.' : 'Add to Home Screen, then enable from there.');
+    return;
+  }
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    let sub = await reg.pushManager.getSubscription();
+    if (!sub) {
+      sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlB64ToUint8Array(PUSH_PUBLIC_KEY),
+      });
+    }
+    const res = await fetch(apiBase() + '/subscribe', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(sub),
+    });
+    if (!res.ok) throw new Error('backend ' + res.status);
+    const cfg = getConfig(); cfg.alerts = true; setConfig(cfg);
+    reflectAlertsState();
+    setStatus('✓ Alerts enabled on this device.');
+  } catch (e) {
+    setStatus('Could not enable: ' + e.message);
+  }
+}
+
+async function disableAlerts() {
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.getSubscription();
+    if (sub) {
+      try {
+        await fetch(apiBase() + '/subscribe', {
+          method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(sub),
+        });
+      } catch (e) { /* ignore network */ }
+      await sub.unsubscribe();
+    }
+  } catch (e) { /* ignore */ }
+  const cfg = getConfig(); cfg.alerts = false; setConfig(cfg);
+  reflectAlertsState();
+  setStatus('Alerts disabled.');
+}
+
+async function sendTestPush() {
+  if (!apiBase()) { setStatus('Set the backend URL first.'); return; }
+  setStatus('Sending test…');
+  try {
+    const res = await fetch(apiBase() + '/test', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}),
+    });
+    const j = await res.json().catch(() => ({}));
+    setStatus(res.ok ? `Test sent to ${j.sent || 0} device(s).` : `Test failed (${res.status}).`);
+  } catch (e) {
+    setStatus('Test failed — check backend URL / connection.');
+  }
+}
+
+function initSettings() {
+  const panel = document.getElementById('settings-panel');
+  const api = document.getElementById('cfg-api');
+  api.value = getConfig().apiBase || '';
+
+  document.getElementById('alerts-btn').addEventListener('click', () => {
+    panel.classList.add('open'); reflectAlertsState();
+  });
+  document.getElementById('settings-close').addEventListener('click', () => panel.classList.remove('open'));
+  panel.addEventListener('click', (e) => { if (e.target === panel) panel.classList.remove('open'); });
+  api.addEventListener('change', () => { const cfg = getConfig(); cfg.apiBase = api.value.trim(); setConfig(cfg); });
+  document.getElementById('cfg-alerts').addEventListener('click', () => {
+    getConfig().alerts ? disableAlerts() : enableAlerts();
+  });
+  document.getElementById('cfg-test').addEventListener('click', sendTestPush);
+  reflectAlertsState();
+}
+
+// ════════════════════════════════════
 // APP START
 // ════════════════════════════════════
 async function startApp() {
@@ -1214,6 +1389,7 @@ async function startApp() {
 
   initMap();
   restoreEvents();   // repopulate log + markers saved from a previous session
+  initSettings();    // wire up the alerts / sharing panel
   startGPS();
   setupTouchSuppression();
 
