@@ -8,7 +8,7 @@
 //    so any area viewed while online stays available offline.
 // ════════════════════════════════════════════════════════════════
 
-const VERSION    = 'v2';
+const VERSION    = 'v3';
 const SHELL_CACHE = `pireplog-shell-${VERSION}`;
 const TILE_CACHE  = `pireplog-tiles-${VERSION}`;
 const FONT_CACHE  = `pireplog-fonts-${VERSION}`;

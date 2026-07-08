@@ -1372,8 +1372,11 @@ async function enableAlerts() {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(sub),
     });
     if (!res.ok) throw new Error('backend ' + res.status);
-    const cfg = getConfig(); cfg.alerts = true; setConfig(cfg);
+    const cfg = getConfig(); cfg.alerts = true;
+    if (!cfg.lastAlertSeen) cfg.lastAlertSeen = Date.now();  // baseline: only surface alerts from now on
+    setConfig(cfg);
     reflectAlertsState();
+    startAlertPolling();
     setStatus('✓ Alerts enabled on this device.');
   } catch (e) {
     setStatus('Could not enable: ' + e.message);
@@ -1410,6 +1413,77 @@ async function sendTestPush() {
   } catch (e) {
     setStatus('Test failed — check backend URL / connection.');
   }
+}
+
+// ════════════════════════════════════
+// ALERT POLLING FALLBACK
+// Platform push (APNs) can be silently blocked by in-flight wifi even when the
+// backend delivered the alert to Apple. While this app is open we ALSO poll the
+// backend directly over plain HTTPS — which the wifi is far more likely to allow
+// — and surface any alert we haven't shown yet. This is foreground-only: iOS
+// suspends a PWA's background JS, so polling complements push, it doesn't
+// replace it. Alerts already delivered by push are de-duplicated by tag+id.
+// ════════════════════════════════════
+const ALERT_POLL_MS = 15000;
+let alertPollTimer = null;
+let alertPollInFlight = false;
+
+function lastAlertSeen() { return +getConfig().lastAlertSeen || 0; }
+function setLastAlertSeen(ts) { const c = getConfig(); c.lastAlertSeen = ts; setConfig(c); }
+
+async function showLocalAlert(a) {
+  const title = a.title || 'PIREPlog';
+  const body  = a.body  || 'Turbulence alert';
+  // Prefer a real OS notification — it works even though the push never arrived.
+  try {
+    if (typeof Notification !== 'undefined' && Notification.permission === 'granted'
+        && 'serviceWorker' in navigator) {
+      const reg = await navigator.serviceWorker.ready;
+      await reg.showNotification(title, {
+        body, icon: './icons/icon-192.png', badge: './icons/icon-192.png',
+        tag: (a.tag || 'pirep-alert') + ':' + a.id,   // unique per alert → not coalesced
+        renotify: true,
+        data: { url: a.url || './' },
+      });
+      return;
+    }
+  } catch (e) { /* fall through to in-app toast */ }
+  // Fallback if notifications aren't granted or showNotification fails.
+  toast(`${title} — ${body}`, null, 'warn');
+}
+
+async function pollAlerts() {
+  const base = apiBase();
+  if (!base || !getConfig().alerts || alertPollInFlight) return;
+  // First run after enabling: set a baseline so we don't replay retained backlog.
+  if (!lastAlertSeen()) { setLastAlertSeen(Date.now()); return; }
+  alertPollInFlight = true;
+  try {
+    let since = lastAlertSeen();
+    const res = await fetch(base + '/alerts?since=' + since, { cache: 'no-store' });
+    if (!res.ok) return;
+    const j = await res.json().catch(() => ({}));
+    const alerts = Array.isArray(j.alerts) ? j.alerts : [];
+    for (const a of alerts) {
+      if (!a || typeof a.id !== 'number' || a.id <= since) continue;
+      await showLocalAlert(a);
+      if (a.id > since) since = a.id;
+    }
+    if (since > lastAlertSeen()) setLastAlertSeen(since);
+  } catch (e) {
+    // Offline or backend unreachable through the wifi — ignore; push may still land.
+  } finally {
+    alertPollInFlight = false;
+  }
+}
+
+function startAlertPolling() {
+  if (alertPollTimer) return;
+  const tick = () => { if (document.visibilityState === 'visible') pollAlerts(); };
+  alertPollTimer = setInterval(tick, ALERT_POLL_MS);
+  // Poll promptly whenever the app returns to the foreground.
+  document.addEventListener('visibilitychange', tick);
+  tick();
 }
 
 function initSettings() {
@@ -1463,7 +1537,28 @@ async function startApp() {
   // Periodic tasks
   setInterval(refreshMarkers,  CFG.MARKER_REFRESH);
   setInterval(refreshLogAges,  15000);
+
+  if (getConfig().alerts) startAlertPolling();  // resume poll fallback for returning users
+  keepScreenAwake();                            // stop iOS suspending detection while in front
 }
+
+// ════════════════════════════════════
+// SCREEN WAKE LOCK
+// iOS suspends a PWA (motion events + timers stop) the moment it is backgrounded
+// OR the screen locks. We can't run in the background, but we CAN stop the screen
+// sleeping while PIREPlog is the frontmost app — so a dedicated iPad left on this
+// app keeps detecting turbulence for the whole flight. Re-acquired whenever the
+// app returns to the foreground (the lock is dropped on background).
+// ════════════════════════════════════
+let wakeLock = null;
+async function keepScreenAwake() {
+  if (!('wakeLock' in navigator)) return;
+  try { wakeLock = await navigator.wakeLock.request('screen'); }
+  catch (e) { /* denied or not visible — retry on next foreground */ }
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') keepScreenAwake();
+});
 
 function showSensorError(msg) {
   const body = document.getElementById('log-body');
