@@ -8,7 +8,7 @@
 //    so any area viewed while online stays available offline.
 // ════════════════════════════════════════════════════════════════
 
-const VERSION    = 'v3';
+const VERSION    = 'v4';
 const SHELL_CACHE = `pireplog-shell-${VERSION}`;
 const TILE_CACHE  = `pireplog-tiles-${VERSION}`;
 const FONT_CACHE  = `pireplog-fonts-${VERSION}`;
@@ -166,12 +166,21 @@ self.addEventListener('fetch', (event) => {
 
   // Same-origin app shell.
   if (url.origin === self.location.origin) {
-    // Navigations always fall back to the cached shell when offline.
+    // Navigations fall back to the cached shell when offline — and also on
+    // HTTP errors (404/5xx), so an installed app keeps opening even if the
+    // hosting is down or the site was taken private.
     if (req.mode === 'navigate') {
       event.respondWith(
-        fetch(req).catch(() =>
-          caches.match(req).then((r) => r || caches.match('./index.html'))
-        )
+        fetch(req)
+          .then((res) => {
+            if (res && res.ok) return res;
+            return caches.match(req)
+              .then((c) => c || caches.match('./index.html'))
+              .then((c) => c || res);
+          })
+          .catch(() =>
+            caches.match(req).then((r) => r || caches.match('./index.html'))
+          )
       );
       return;
     }

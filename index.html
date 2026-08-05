@@ -326,6 +326,10 @@ html, body { height:100%; overflow:hidden; background:var(--bg); color:var(--tex
       <div class="inst-label">ALT (GPS)</div>
       <div class="inst-value" id="iv-alt" style="font-size:13px;padding-top:2px;">—</div>
     </div>
+    <div class="inst">
+      <div class="inst-label">GS / TRK</div>
+      <div class="inst-value" id="iv-gs" style="font-size:13px;padding-top:2px;">–– ––</div>
+    </div>
     <div class="inst" style="flex:2">
       <div class="inst-label">
         <span id="gps-dot"></span>POSITION
@@ -381,7 +385,8 @@ html, body { height:100%; overflow:hidden; background:var(--bg); color:var(--tex
     <div class="settings-note">
       Severe-turbulence push alerts. On iPad, add PIREPlog to the Home Screen and
       open it from there for alerts to work. Enable on the ground — delivery still
-      works in flight over the device's push channel.
+      works in flight over the device's push channel. While enabled, this device
+      also alerts the others automatically when it logs severe turbulence.
     </div>
   </div>
 </div>
@@ -880,8 +885,37 @@ function logEvent(level, rmsG, jerkG) {
   addMarker(ev);
   prependLogRow(ev);
   saveEvents();
+  maybePushAlert(ev);
   // Fly to event only if not already following position
   if (!followPosition) map.panTo([ev.lat, ev.lon], {animate:true, duration:0.5});
+}
+
+// ════════════════════════════════════
+// AUTO SEVERE ALERT
+// When a severe event is logged and the push backend is configured, notify
+// every subscribed device so other crews see it in near-real time. Push
+// rides the platform push channel, so delivery works in flight too.
+// ════════════════════════════════════
+let lastAlertSent = 0;
+const ALERT_COOL_MS = 5 * 60 * 1000;   // don't re-alert the same rough patch
+
+function maybePushAlert(ev) {
+  if (ev.level !== 'severe') return;
+  const cfg = getConfig();
+  if (!cfg.alerts || !apiBase()) return;
+  if (Date.now() - lastAlertSent < ALERT_COOL_MS) return;
+  lastAlertSent = Date.now();
+
+  const t = new Date(ev.id).toISOString().slice(11, 16) + 'Z';
+  const ft = altFt(ev.alt);
+  const altStr = ft !== null ? ` FL~${Math.round(ft / 100)}` : '';
+  fetch(apiBase() + '/alert', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      body: `Severe turbulence ${ev.lat.toFixed(2)}° ${ev.lon.toFixed(2)}°${altStr} at ${t} (${ev.rmsG.toFixed(2)} g)`,
+    }),
+  }).catch(() => { /* offline or backend unreachable — the local log still has it */ });
 }
 
 // ════════════════════════════════════
@@ -972,7 +1006,7 @@ function prependLogRow(ev) {
     <span class="log-pos">${ev.lat.toFixed(4)}° ${ev.lon.toFixed(4)}°</span>
     <span class="log-alt">${fmtFL(ev.alt) || '—'}</span>
   `;
-  row.addEventListener('click', () => map.flyTo([ev.lat, ev.lon], 10, {duration:1}));
+  row.addEventListener('click', () => map.flyTo([ev.lat, ev.lon], Math.max(map.getZoom(), 9), {duration:1}));
   body.insertBefore(row, body.firstChild);
 }
 
@@ -1047,9 +1081,15 @@ function startGPS() {
     const acc = pos.coords.accuracy;
     const alt = pos.coords.altitude;  // metres above WGS84 ellipsoid, null if unavailable
     const hdg = pos.coords.heading;  // degrees from north, null if not moving
+    const spd = pos.coords.speed;    // m/s over ground, null if unavailable
 
     gpsPos = { lat, lon, alt };
     if (hdg !== null && !isNaN(hdg)) gpsHeading = hdg;
+
+    // Ground speed in knots + track — the units a pilot actually thinks in.
+    const gsStr  = (spd !== null && isFinite(spd)) ? Math.round(spd * 1.94384) + 'kt' : '––';
+    const trkStr = (gpsHeading !== null) ? String(Math.round(gpsHeading)).padStart(3, '0') + '°' : '––';
+    document.getElementById('iv-gs').textContent = `${gsStr} ${trkStr}`;
 
     document.getElementById('gps-dot').classList.add('active');
     document.getElementById('iv-pos').textContent =
@@ -1144,9 +1184,8 @@ function initMap() {
     const next = TILE_LAYERS[currentLayerIdx];
     map.removeLayer(activeLayer);
     activeLayer = L.tileLayer(next.url, next.opts).addTo(map);
-    // Keep turbulence markers & position marker on top
-    if (posMarker)        posMarker.bringToFront();
-    if (posAccuracyCircle) posAccuracyCircle.bringToFront();
+    // Markers/overlays live in panes above the tile pane, so nothing to re-order.
+    // (L.Marker has no bringToFront — calling it here used to break this button.)
     layerBtn.innerHTML = next.label;
   });
 

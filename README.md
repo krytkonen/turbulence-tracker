@@ -20,6 +20,12 @@ Uses iPad accelerometers and GPS to detect, categorise, and georeference turbule
 - **Installable PWA** — runs full-screen and works offline / in-flight (no a-Shell needed)
 - **Persistent log** — turbulence events are saved locally and restored after a
   reload or app relaunch
+- **GS / TRK instrument** — GPS ground speed (knots) and track alongside the
+  altitude and accelerometer readouts
+- **Event altitude** — GPS altitude is recorded per event, shown in the popup
+  and log (≈FL) and carried through CSV/GeoJSON exports
+- **Auto severe alert** — with alerts enabled, a device that logs severe
+  turbulence automatically pushes an alert to every subscribed device
 - **Share / export** the log as **CSV** or **GeoJSON** (native iPad share sheet,
   with download fallback)
 - **Import / merge** a log shared by another crew (GeoJSON or CSV) onto your own
